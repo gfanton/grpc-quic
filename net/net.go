@@ -1,13 +1,10 @@
 package grpcquic
 
 import (
-	"context"
-	"fmt"
 	"net"
 	"time"
 
 	quic "github.com/lucas-clemente/quic-go"
-	"google.golang.org/grpc/credentials"
 )
 
 var _ net.Conn = (*Conn)(nil)
@@ -15,6 +12,15 @@ var _ net.Conn = (*Conn)(nil)
 type Conn struct {
 	sess   quic.Session
 	stream quic.Stream
+}
+
+func NewConn(sess quic.Session) (net.Conn, error) {
+	stream, err := sess.OpenStreamSync()
+	if err != nil {
+		return nil, err
+	}
+
+	return &Conn{sess, stream}, nil
 }
 
 // Read reads data from the connection.
@@ -92,6 +98,10 @@ type Listener struct {
 	ql quic.Listener
 }
 
+func Listen(ql quic.Listener) net.Listener {
+	return &Listener{ql}
+}
+
 // Accept waits for and returns the next connection to the listener.
 func (l *Listener) Accept() (net.Conn, error) {
 	sess, err := l.ql.Accept()
@@ -116,93 +126,4 @@ func (l *Listener) Close() error {
 // Addr returns the listener's network address.
 func (l *Listener) Addr() net.Addr {
 	return l.ql.Addr()
-}
-
-// Info is a credentials.AuthInfo
-
-var _ credentials.AuthInfo = (*Info)(nil)
-
-// Info contains the auth information
-type Info struct {
-	conn *Conn
-}
-
-func NewInfo(c *Conn) *Info {
-	return &Info{c}
-}
-
-// AuthType returns the type of Info as a string.
-func (i *Info) AuthType() string {
-	return "quic-tls"
-}
-
-func (i *Info) Conn() *Conn {
-	return i.conn
-}
-
-var _ credentials.TransportCredentials = (*TransportCredentials)(nil)
-
-type TransportCredentials struct{}
-
-var p2pinfo Info = Info{}
-
-// ClientHandshake does the authentication handshake specified by the corresponding
-// authentication protocol on rawConn for clients. It returns the authenticated
-// connection and the corresponding auth information about the connection.
-// Implementations must use the provided context to implement timely cancellation.
-// gRPC will try to reconnect if the error returned is a temporary error
-// (io.EOF, context.DeadlineExceeded or err.Temporary() == true).
-// If the returned error is a wrapper error, implementations should make sure that
-// the error implements Temporary() to have the correct retry behaviors.
-//
-// If the returned net.Conn is closed, it MUST close the net.Conn provided.
-func (pt *TransportCredentials) ClientHandshake(ctx context.Context, authority string, conn net.Conn) (net.Conn, credentials.AuthInfo, error) {
-	fmt.Print("Client Handshake...")
-	if c, ok := conn.(*Conn); ok {
-		ainfo := NewInfo(c)
-		return conn, ainfo, nil
-	}
-	fmt.Println("Done")
-	return nil, nil, fmt.Errorf("Not a valid quic conn")
-}
-
-// ServerHandshake does the authentication handshake for servers. It returns
-// the authenticated connection and the corresponding auth information about
-// the connection.
-//
-// If the returned net.Conn is closed, it MUST close the net.Conn provided.
-func (pt *TransportCredentials) ServerHandshake(conn net.Conn) (net.Conn, credentials.AuthInfo, error) {
-
-	if c, ok := conn.(*Conn); ok {
-		ainfo := NewInfo(c)
-		return conn, ainfo, nil
-	}
-
-	return nil, nil, fmt.Errorf("Not a valid p2p conn")
-}
-
-// Info provides the ProtocolInfo of this TransportCredentials.
-func (pt *TransportCredentials) Info() credentials.ProtocolInfo {
-	return credentials.ProtocolInfo{
-		// ProtocolVersion is the gRPC wire protocol version.
-		ProtocolVersion: "/quic/1.0.0",
-		// SecurityProtocol is the security protocol in use.
-		SecurityProtocol: "quic-tls",
-		// SecurityVersion is the security protocol version.
-		SecurityVersion: "1.2.0",
-		// ServerName is the user-configured server name.
-		ServerName: "test",
-	}
-}
-
-// Clone makes a copy of this TransportCredentials.
-func (pt *TransportCredentials) Clone() credentials.TransportCredentials {
-	return &TransportCredentials{}
-}
-
-// OverrideServerName overrides the server name used to verify the hostname on the returned certificates from the server.
-// gRPC internals also use it to override the virtual hosting name if it is set.
-// It must be called before dialing. Currently, this is only used by grpclb.
-func (pt *TransportCredentials) OverrideServerName(name string) error {
-	return nil
 }

@@ -11,13 +11,12 @@ import (
 	"testing"
 	"time"
 
-	gq "github.com/gfanton/grpc-quic"
+	qgrpc "github.com/gfanton/grpc-quic"
 	"github.com/gfanton/grpc-quic/example/proto/hello"
+	"github.com/gfanton/grpc-quic/opts"
 	. "github.com/smartystreets/goconvey/convey"
 	"google.golang.org/grpc"
 )
-
-const ADDR = "127.0.0.1:5678"
 
 type Hello struct{}
 
@@ -52,11 +51,9 @@ func generateTLSConfig() (*tls.Config, error) {
 
 func TestDial(t *testing.T) {
 	var (
+		addr   = "/ip4/127.0.0.1/udp/5847"
 		client *grpc.ClientConn
 		server *grpc.Server
-
-		tlsclient *tls.Config
-		tlsserver *tls.Config
 
 		err error
 	)
@@ -73,29 +70,25 @@ func TestDial(t *testing.T) {
 
 	Convey("Setup server", t, func(c C) {
 		//setup server
-		tlsserver, err = generateTLSConfig()
+		tlsConf, err := generateTLSConfig()
 		So(err, ShouldBeNil)
 
-		ts, err := gq.NewGrpcQuicTransport(ADDR, tlsserver)
+		server, l, err := qgrpc.NewServer(addr, opts.TLSConfig(tlsConf))
 		So(err, ShouldBeNil)
 
-		server = ts.NewGrpcServer()
 		hello.RegisterGreeterServer(server, &Hello{})
 
 		go func() {
-			err := ts.GrpcServe(server)
+			err := server.Serve(l)
 			c.So(err, ShouldBeNil)
 		}()
 	})
 
 	Convey("Setup client", t, func() {
-		tlsclient = &tls.Config{InsecureSkipVerify: true}
+		tlsConf := &tls.Config{InsecureSkipVerify: true}
 
 		// Take a random port to listen from udp server
-		tc, err := gq.NewGrpcQuicTransport("localhost:0", tlsclient)
-		So(err, ShouldBeNil)
-
-		client, err = tc.GrpcDial(ADDR)
+		client, err = qgrpc.Dial(addr, opts.WithTLSConfig(tlsConf))
 		So(err, ShouldBeNil)
 	})
 
