@@ -49,9 +49,8 @@ func generateTLSConfig() (*tls.Config, error) {
 	return &tls.Config{Certificates: []tls.Certificate{tlsCert}}, nil
 }
 
-func TestDial(t *testing.T) {
+func testDial(t *testing.T, addr string) {
 	var (
-		addr   = "/ip4/127.0.0.1/udp/5847"
 		client *grpc.ClientConn
 		server *grpc.Server
 
@@ -104,4 +103,13 @@ func TestDial(t *testing.T) {
 		So(err, ShouldBeNil)
 		So(rep.GetMessage(), ShouldEqual, "Hello World")
 	})
+}
+func TestDialUDP(t *testing.T) {
+	addr := "/ip4/127.0.0.1/udp/5847"
+	testDial(t, addr)
+}
+
+func TestDialTCP(t *testing.T) {
+	addr := "/ip4/127.0.0.1/tcp/5847"
+	testDial(t, addr)
 }

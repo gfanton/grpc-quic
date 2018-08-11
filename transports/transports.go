@@ -2,7 +2,7 @@ package transports
 
 import (
 	"context"
-	"fmt"
+	"crypto/tls"
 	"net"
 
 	quicnet "github.com/gfanton/grpc-quic/net"
@@ -31,7 +31,15 @@ func (i *Info) Conn() net.Conn {
 
 var _ credentials.TransportCredentials = (*Credentials)(nil)
 
-type Credentials struct{}
+type Credentials struct {
+	grpcCreds credentials.TransportCredentials
+	tlsConfig *tls.Config
+}
+
+func NewCredentials(tlsConfig *tls.Config) credentials.TransportCredentials {
+	grpcCreds := credentials.NewTLS(tlsConfig)
+	return &Credentials{grpcCreds, tlsConfig}
+}
 
 // ClientHandshake does the authentication handshake specified by the corresponding
 // authentication protocol on rawConn for clients. It returns the authenticated
@@ -48,7 +56,7 @@ func (pt *Credentials) ClientHandshake(ctx context.Context, authority string, co
 		return conn, NewInfo(c), nil
 	}
 
-	return nil, nil, fmt.Errorf("Not a valid quic conn")
+	return pt.grpcCreds.ClientHandshake(ctx, authority, conn)
 }
 
 // ServerHandshake does the authentication handshake for servers. It returns
@@ -62,26 +70,20 @@ func (pt *Credentials) ServerHandshake(conn net.Conn) (net.Conn, credentials.Aut
 		return conn, ainfo, nil
 	}
 
-	return nil, nil, fmt.Errorf("Not a valid quic conn")
+	return pt.grpcCreds.ServerHandshake(conn)
 }
 
 // Info provides the ProtocolInfo of this Credentials.
 func (pt *Credentials) Info() credentials.ProtocolInfo {
-	return credentials.ProtocolInfo{
-		// ProtocolVersion is the gRPC wire protocol version.
-		ProtocolVersion: "/quic/1.0.0",
-		// SecurityProtocol is the security protocol in use.
-		SecurityProtocol: "quic-tls",
-		// SecurityVersion is the security protocol version.
-		SecurityVersion: "1.2.0",
-		// ServerName is the user-configured server name.
-		ServerName: "test",
-	}
+	return pt.grpcCreds.Info()
 }
 
 // Clone makes a copy of this Credentials.
 func (pt *Credentials) Clone() credentials.TransportCredentials {
-	return &Credentials{}
+	return &Credentials{
+		tlsConfig: pt.tlsConfig.Clone(),
+		grpcCreds: pt.grpcCreds.Clone(),
+	}
 }
 
 // OverrideServerName overrides the server name used to verify the hostname on the returned certificates from the server.
