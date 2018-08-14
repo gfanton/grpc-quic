@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package hello;
 
-option go_package = "github.com/gfanton/grpc-quic/example/proto/hello";
+option go_package = "github.com/gfanton/grpc-quic/proto/hello";
 
 // The greeting service definition.
 service Greeter {

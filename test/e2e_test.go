@@ -12,8 +12,8 @@ import (
 	"time"
 
 	qgrpc "github.com/gfanton/grpc-quic"
-	"github.com/gfanton/grpc-quic/example/proto/hello"
 	"github.com/gfanton/grpc-quic/opts"
+	"github.com/gfanton/grpc-quic/proto/hello"
 	. "github.com/smartystreets/goconvey/convey"
 	"google.golang.org/grpc"
 )
