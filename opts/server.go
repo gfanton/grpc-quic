@@ -17,9 +17,7 @@ type ServerConfig struct {
 type ServerOption func(o *ServerConfig) error
 
 func NewServerConfig() *ServerConfig {
-	return &ServerConfig{
-		GrpcServerOptions: make([]grpc.ServerOption, 0),
-	}
+	return &ServerConfig{}
 }
 
 func (c *ServerConfig) Apply(opts ...ServerOption) error {

@@ -17,9 +17,7 @@ type ClientConfig struct {
 type DialOption func(o *ClientConfig) error
 
 func NewClientConfig() *ClientConfig {
-	return &ClientConfig{
-		GrpcDialOptions: make([]grpc.DialOption, 0),
-	}
+	return &ClientConfig{}
 }
 
 func (c *ClientConfig) Apply(opts ...DialOption) error {
