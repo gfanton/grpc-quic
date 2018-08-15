@@ -68,6 +68,7 @@ type rrPicker struct {
 	next int
 }
 
+// @TODO: Round robin around udp first then tcp
 func (p *rrPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balancer.SubConn, func(balancer.DoneInfo), error) {
 	// Chain TCP subConn after UDP subconn
 	scs := append(p.subConnsUDP, p.subConnsTCP...)

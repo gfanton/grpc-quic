@@ -129,7 +129,7 @@ func WithDecompressor(dc grpc.Decompressor) DialOption {
 
 // UNAVAILABLE
 // func WithBalancer(b Balancer) DialOption {
-// 	return withGrpcDialOptions(grpc.WithBalancer(b))
+//      return withGrpcDialOptions(grpc.WithBalancer(b))
 // }
 
 // WithBalancerName sets the balancer that the ClientConn will be initialized
@@ -140,11 +140,9 @@ func WithDecompressor(dc grpc.Decompressor) DialOption {
 // config.
 //
 // This is an EXPERIMENTAL API.
-
-// UNAVAILABLE
-// func WithBalancerName(balancerName string) DialOption {
-// 	return withGrpcDialOptions(grpc.WithBalancerName(balancerName))
-// }
+func WithBalancerName(balancerName string) DialOption {
+	return withGrpcDialOptions(grpc.WithBalancerName(balancerName))
+}
 
 // withResolverBuilder is only for grpclb.
 
