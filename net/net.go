@@ -1,4 +1,4 @@
-package grpcquic
+package net
 
 import (
 	"net"

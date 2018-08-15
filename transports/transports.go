@@ -2,7 +2,7 @@ package transports
 
 import (
 	"context"
-	"fmt"
+	"crypto/tls"
 	"net"
 
 	quicnet "github.com/gfanton/grpc-quic/net"
@@ -31,7 +31,21 @@ func (i *Info) Conn() net.Conn {
 
 var _ credentials.TransportCredentials = (*Credentials)(nil)
 
-type Credentials struct{}
+type Credentials struct {
+	tlsConfig        *tls.Config
+	isQuicConnection bool
+	serverName       string
+
+	grpcCreds credentials.TransportCredentials
+}
+
+func NewCredentials(tlsConfig *tls.Config) credentials.TransportCredentials {
+	grpcCreds := credentials.NewTLS(tlsConfig)
+	return &Credentials{
+		grpcCreds: grpcCreds,
+		tlsConfig: tlsConfig,
+	}
+}
 
 // ClientHandshake does the authentication handshake specified by the corresponding
 // authentication protocol on rawConn for clients. It returns the authenticated
@@ -45,10 +59,11 @@ type Credentials struct{}
 // If the returned net.Conn is closed, it MUST close the net.Conn provided.
 func (pt *Credentials) ClientHandshake(ctx context.Context, authority string, conn net.Conn) (net.Conn, credentials.AuthInfo, error) {
 	if c, ok := conn.(*quicnet.Conn); ok {
+		pt.isQuicConnection = true
 		return conn, NewInfo(c), nil
 	}
 
-	return nil, nil, fmt.Errorf("Not a valid quic conn")
+	return pt.grpcCreds.ClientHandshake(ctx, authority, conn)
 }
 
 // ServerHandshake does the authentication handshake for servers. It returns
@@ -58,35 +73,44 @@ func (pt *Credentials) ClientHandshake(ctx context.Context, authority string, co
 // If the returned net.Conn is closed, it MUST close the net.Conn provided.
 func (pt *Credentials) ServerHandshake(conn net.Conn) (net.Conn, credentials.AuthInfo, error) {
 	if c, ok := conn.(*quicnet.Conn); ok {
+		pt.isQuicConnection = true
 		ainfo := NewInfo(c)
 		return conn, ainfo, nil
 	}
 
-	return nil, nil, fmt.Errorf("Not a valid quic conn")
+	return pt.grpcCreds.ServerHandshake(conn)
 }
 
 // Info provides the ProtocolInfo of this Credentials.
 func (pt *Credentials) Info() credentials.ProtocolInfo {
-	return credentials.ProtocolInfo{
-		// ProtocolVersion is the gRPC wire protocol version.
-		ProtocolVersion: "/quic/1.0.0",
-		// SecurityProtocol is the security protocol in use.
-		SecurityProtocol: "quic-tls",
-		// SecurityVersion is the security protocol version.
-		SecurityVersion: "1.2.0",
-		// ServerName is the user-configured server name.
-		ServerName: "test",
+	if pt.isQuicConnection {
+		return credentials.ProtocolInfo{
+			// ProtocolVersion is the gRPC wire protocol version.
+			ProtocolVersion: "/quic/1.0.0",
+			// SecurityProtocol is the security protocol in use.
+			SecurityProtocol: "quic-tls",
+			// SecurityVersion is the security protocol version.
+			SecurityVersion: "1.2.0",
+			// ServerName is the user-configured server name.
+			ServerName: pt.serverName,
+		}
 	}
+
+	return pt.grpcCreds.Info()
 }
 
 // Clone makes a copy of this Credentials.
 func (pt *Credentials) Clone() credentials.TransportCredentials {
-	return &Credentials{}
+	return &Credentials{
+		tlsConfig: pt.tlsConfig.Clone(),
+		grpcCreds: pt.grpcCreds.Clone(),
+	}
 }
 
 // OverrideServerName overrides the server name used to verify the hostname on the returned certificates from the server.
 // gRPC internals also use it to override the virtual hosting name if it is set.
 // It must be called before dialing. Currently, this is only used by grpclb.
 func (pt *Credentials) OverrideServerName(name string) error {
-	return nil
+	pt.serverName = name
+	return pt.grpcCreds.OverrideServerName(name)
 }

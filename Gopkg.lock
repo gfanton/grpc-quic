@@ -44,6 +44,12 @@
 
 [[projects]]
   branch = "master"
+  name = "github.com/gxed/hashland"
+  packages = ["keccakpg"]
+  revision = "d9f6b97f8db22dd1e090fd0bbbe98f09cc7dd0a8"
+
+[[projects]]
+  branch = "master"
   name = "github.com/hashicorp/golang-lru"
   packages = [
     ".",
@@ -87,6 +93,42 @@
   revision = "d2f86524cced5186554df90d92529757d22c1cb6"
 
 [[projects]]
+  branch = "master"
+  name = "github.com/minio/blake2b-simd"
+  packages = ["."]
+  revision = "3f5f724cb5b182a5c278d6d3d55b40e7f8c2efb4"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/minio/sha256-simd"
+  packages = ["."]
+  revision = "ad98a36ba0da87206e3378c556abbfeaeaa98668"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/mr-tron/base58"
+  packages = ["base58"]
+  revision = "f84df45a6b88974a98d1473e9f0de0eac859a3d9"
+
+[[projects]]
+  name = "github.com/multiformats/go-multiaddr"
+  packages = ["."]
+  revision = "f36800afeb9c141e1adb7da099e6f010dfd4c419"
+  version = "v1.2.7"
+
+[[projects]]
+  name = "github.com/multiformats/go-multiaddr-net"
+  packages = ["."]
+  revision = "4d4b901d1729f55ee20cc0c8d8021aa58eb5ebe3"
+  version = "v1.6.2"
+
+[[projects]]
+  name = "github.com/multiformats/go-multihash"
+  packages = ["."]
+  revision = "8be2a682ab9f254311de1375145a2f78a809b07d"
+  version = "v1.0.8"
+
+[[projects]]
   name = "github.com/smartystreets/assertions"
   packages = [
     ".",
@@ -107,10 +149,18 @@
   version = "1.6.3"
 
 [[projects]]
+  name = "github.com/spaolacci/murmur3"
+  packages = ["."]
+  revision = "9f5d223c60793748f04a9d5b4b4eacddfc1f755d"
+  version = "v1.1"
+
+[[projects]]
   name = "golang.org/x/crypto"
   packages = [
+    "blake2s",
     "curve25519",
-    "hkdf"
+    "hkdf",
+    "sha3"
   ]
   revision = "d585fd2cc9195196078f516b69daff6744ef5e84"
 
@@ -189,6 +239,7 @@
     "peer",
     "resolver",
     "resolver/dns",
+    "resolver/manual",
     "resolver/passthrough",
     "stats",
     "status",
@@ -200,6 +251,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "1895e300fb9aca8bbfe239f6ec3da9b65edd5924660d04e9c0f8963e40cd39fd"
+  inputs-digest = "37a12dc960db16fd8d32880eafd34253aa70b0e5055ca2364505b4edce41143e"
   solver-name = "gps-cdcl"
   solver-version = 1
