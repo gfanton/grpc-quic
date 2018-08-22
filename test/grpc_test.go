@@ -131,8 +131,7 @@ func testBalancerProgressiveClose(mresolver *manual.Resolver, client hello.Greet
 		s.Stop()
 
 		// Wait for shutdown
-		time.Sleep(time.Microsecond * 5)
-
+		time.Sleep(time.Second)
 		rep, err := client.SayHello(ctx, req)
 		if i == len(servers)-1 {
 			So(err, ShouldNotBeNil)
@@ -251,7 +250,7 @@ func TestBalancerTCPtoUDP(t *testing.T) {
 func TestBalancerUDPtoTCP(t *testing.T) {
 	balancerName := quicbalancer.Name
 	serverAddrs := []string{
-		// UDP servers
+		// TCP servers
 		"/ip4/127.0.0.1/tcp/6851",
 	}
 

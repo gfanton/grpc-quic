@@ -2,8 +2,9 @@ rwildcard = $(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2) $(filter $(subs
 PROTOS = $(call rwildcard, $(wildcard proto/), *.proto)
 GENERATED_FILES = $(patsubst %.proto,%.pb.go,$(PROTOS)) \
 
+.PHONY: test
 test:
-	echo $(PROTOS)
+	go test -v test/grpc_test.go
 
 .PHONY: generate
 generate: $(GENERATED_FILES)
