@@ -79,7 +79,7 @@ func (iv *InvariantHeader) Parse(b *bytes.Reader, sentBy protocol.Perspective, v
 		if iv.Version == 0 { // Version Negotiation Packet
 			return iv.parseVersionNegotiationPacket(b)
 		}
-		return iv.parseLongHeader(b)
+		return iv.parseLongHeader(b, sentBy, ver)
 	}
 	// The Public Header never uses 6 byte packet numbers.
 	// Therefore, the third and fourth bit will never be 11.
@@ -90,8 +90,7 @@ func (iv *InvariantHeader) Parse(b *bytes.Reader, sentBy protocol.Perspective, v
 		}
 		return iv.parsePublicHeader(b, sentBy, ver)
 	}
-	return iv.parseShortHeader(b)
-
+	return iv.parseShortHeader(b, ver)
 }
 
 func (iv *InvariantHeader) toHeader() *Header {
@@ -121,37 +120,108 @@ func (iv *InvariantHeader) parseVersionNegotiationPacket(b *bytes.Reader) (*Head
 	return h, nil
 }
 
-func (iv *InvariantHeader) parseLongHeader(b *bytes.Reader) (*Header, error) {
+func (iv *InvariantHeader) parseLongHeader(b *bytes.Reader, sentBy protocol.Perspective, v protocol.VersionNumber) (*Header, error) {
 	h := iv.toHeader()
-
-	pl, err := utils.ReadVarInt(b)
-	if err != nil {
-		return nil, err
-	}
-	h.PayloadLen = protocol.ByteCount(pl)
-	pn, pnLen, err := utils.ReadVarIntPacketNumber(b)
-	if err != nil {
-		return nil, err
-	}
-	h.PacketNumber = pn
-	h.PacketNumberLen = pnLen
 	h.Type = protocol.PacketType(iv.typeByte & 0x7f)
 
 	if h.Type != protocol.PacketTypeInitial && h.Type != protocol.PacketTypeRetry && h.Type != protocol.PacketType0RTT && h.Type != protocol.PacketTypeHandshake {
 		return nil, qerr.Error(qerr.InvalidPacketHeader, fmt.Sprintf("Received packet with invalid packet type: %d", h.Type))
 	}
+
+	if h.Type == protocol.PacketTypeRetry {
+		odcilByte, err := b.ReadByte()
+		if err != nil {
+			return nil, err
+		}
+		odcil := decodeSingleConnIDLen(odcilByte & 0xf)
+		h.OrigDestConnectionID, err = protocol.ReadConnectionID(b, odcil)
+		if err != nil {
+			return nil, err
+		}
+		h.Token = make([]byte, b.Len())
+		if _, err := io.ReadFull(b, h.Token); err != nil {
+			return nil, err
+		}
+		return h, nil
+	}
+
+	if h.Type == protocol.PacketTypeInitial && v.UsesTokenInHeader() {
+		tokenLen, err := utils.ReadVarInt(b)
+		if err != nil {
+			return nil, err
+		}
+		if tokenLen > uint64(b.Len()) {
+			return nil, io.EOF
+		}
+		h.Token = make([]byte, tokenLen)
+		if _, err := io.ReadFull(b, h.Token); err != nil {
+			return nil, err
+		}
+	}
+
+	if v.UsesLengthInHeader() {
+		pl, err := utils.ReadVarInt(b)
+		if err != nil {
+			return nil, err
+		}
+		h.PayloadLen = protocol.ByteCount(pl)
+	}
+	if v.UsesVarintPacketNumbers() {
+		pn, pnLen, err := utils.ReadVarIntPacketNumber(b)
+		if err != nil {
+			return nil, err
+		}
+		h.PacketNumber = pn
+		h.PacketNumberLen = pnLen
+	} else {
+		pn, err := utils.BigEndian.ReadUint32(b)
+		if err != nil {
+			return nil, err
+		}
+		h.PacketNumber = protocol.PacketNumber(pn)
+		h.PacketNumberLen = protocol.PacketNumberLen4
+	}
+	if h.Type == protocol.PacketType0RTT && v == protocol.Version44 && sentBy == protocol.PerspectiveServer {
+		h.DiversificationNonce = make([]byte, 32)
+		if _, err := io.ReadFull(b, h.DiversificationNonce); err != nil {
+			if err == io.ErrUnexpectedEOF {
+				return nil, io.EOF
+			}
+			return nil, err
+		}
+	}
+
 	return h, nil
 }
 
-func (iv *InvariantHeader) parseShortHeader(b *bytes.Reader) (*Header, error) {
+func (iv *InvariantHeader) parseShortHeader(b *bytes.Reader, v protocol.VersionNumber) (*Header, error) {
 	h := iv.toHeader()
 	h.KeyPhase = int(iv.typeByte&0x40) >> 6
-	pn, pnLen, err := utils.ReadVarIntPacketNumber(b)
-	if err != nil {
-		return nil, err
+
+	if v.UsesVarintPacketNumbers() {
+		pn, pnLen, err := utils.ReadVarIntPacketNumber(b)
+		if err != nil {
+			return nil, err
+		}
+		h.PacketNumber = pn
+		h.PacketNumberLen = pnLen
+	} else {
+		switch iv.typeByte & 0x3 {
+		case 0x0:
+			h.PacketNumberLen = protocol.PacketNumberLen1
+		case 0x1:
+			h.PacketNumberLen = protocol.PacketNumberLen2
+		case 0x2:
+			h.PacketNumberLen = protocol.PacketNumberLen4
+		default:
+			return nil, errInvalidPacketNumberLen
+		}
+		p, err := utils.BigEndian.ReadUintN(b, uint8(h.PacketNumberLen))
+		if err != nil {
+			return nil, err
+		}
+		h.PacketNumber = protocol.PacketNumber(p)
 	}
-	h.PacketNumber = pn
-	h.PacketNumberLen = pnLen
 	return h, nil
 }
 

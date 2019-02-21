@@ -2,6 +2,7 @@ package wire
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 
 	"github.com/lucas-clemente/quic-go/internal/protocol"
@@ -85,11 +86,6 @@ func parseIETFFrame(r *bytes.Reader, typeByte byte, v protocol.VersionNumber) (F
 		if err != nil {
 			err = qerr.Error(qerr.InvalidFrameData, err.Error())
 		}
-	case 0xd:
-		frame, err = parseAckFrame(r, v)
-		if err != nil {
-			err = qerr.Error(qerr.InvalidAckData, err.Error())
-		}
 	case 0xe:
 		frame, err = parsePathChallengeFrame(r, v)
 		if err != nil {
@@ -100,8 +96,8 @@ func parseIETFFrame(r *bytes.Reader, typeByte byte, v protocol.VersionNumber) (F
 		if err != nil {
 			err = qerr.Error(qerr.InvalidFrameData, err.Error())
 		}
-	case 0x1a:
-		frame, err = parseAckEcnFrame(r, v)
+	case 0x1a, 0x1b:
+		frame, err = parseAckFrame(r, v)
 		if err != nil {
 			err = qerr.Error(qerr.InvalidAckData, err.Error())
 		}
@@ -154,6 +150,10 @@ func parseGQUICFrame(r *bytes.Reader, typeByte byte, hdr *Header, v protocol.Ver
 			err = qerr.Error(qerr.InvalidBlockedData, err.Error())
 		}
 	case 0x6:
+		if !v.UsesStopWaitingFrames() {
+			err = errors.New("STOP_WAITING frames not supported by this QUIC version")
+			break
+		}
 		frame, err = parseStopWaitingFrame(r, hdr.PacketNumber, hdr.PacketNumberLen, v)
 		if err != nil {
 			err = qerr.Error(qerr.InvalidStopWaitingData, err.Error())

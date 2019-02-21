@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/lucas-clemente/quic-go/internal/crypto"
@@ -39,7 +40,6 @@ type packetHandlerManager interface {
 type quicSession interface {
 	Session
 	handlePacket(*receivedPacket)
-	getCryptoStream() cryptoStreamI
 	GetVersion() protocol.VersionNumber
 	run() error
 	destroy(error)
@@ -63,6 +63,8 @@ var _ sessionRunner = &runner{}
 
 // A Listener of QUIC
 type server struct {
+	mutex sync.Mutex
+
 	tlsConf *tls.Config
 	config  *Config
 
@@ -80,13 +82,14 @@ type server struct {
 	sessionHandler packetHandlerManager
 
 	serverError error
+	errorChan   chan struct{}
+	closed      bool
 
 	sessionQueue chan Session
-	errorChan    chan struct{}
 
 	sessionRunner sessionRunner
 	// set as a member, so they can be set in the tests
-	newSession func(connection, sessionRunner, protocol.VersionNumber, protocol.ConnectionID, *handshake.ServerConfig, *tls.Config, *Config, utils.Logger) (quicSession, error)
+	newSession func(connection, sessionRunner, protocol.VersionNumber, protocol.ConnectionID, protocol.ConnectionID, *handshake.ServerConfig, *tls.Config, *Config, utils.Logger) (quicSession, error)
 
 	logger utils.Logger
 }
@@ -120,6 +123,9 @@ func Listen(conn net.PacketConn, tlsConf *tls.Config, config *Config) (Listener,
 }
 
 func listen(conn net.PacketConn, tlsConf *tls.Config, config *Config) (*server, error) {
+	if tlsConf == nil || (len(tlsConf.Certificates) == 0 && tlsConf.GetCertificate == nil) {
+		return nil, errors.New("quic: neither Certificates nor GetCertificate set in tls.Config")
+	}
 	certChain := crypto.NewCertChain(tlsConf)
 	kex, err := crypto.NewCurve25519KEX()
 	if err != nil {
@@ -179,11 +185,7 @@ func (s *server) setup() {
 }
 
 func (s *server) setupTLS() error {
-	cookieHandler, err := handshake.NewCookieHandler(s.config.AcceptCookie, s.logger)
-	if err != nil {
-		return err
-	}
-	serverTLS, sessionChan, err := newServerTLS(s.conn, s.config, s.sessionRunner, cookieHandler, s.tlsConf, s.logger)
+	serverTLS, sessionChan, err := newServerTLS(s.conn, s.config, s.sessionRunner, s.tlsConf, s.logger)
 	if err != nil {
 		return err
 	}
@@ -195,7 +197,7 @@ func (s *server) setupTLS() error {
 			case <-s.errorChan:
 				return
 			case tlsSession := <-sessionChan:
-				// The connection ID is a randomly chosen 8 byte value.
+				// The connection ID is a randomly chosen value.
 				// It is safe to assume that it doesn't collide with other randomly chosen values.
 				serverSession := newServerSession(tlsSession.sess, s.config, s.logger)
 				s.sessionHandler.Add(tlsSession.connID, serverSession)
@@ -270,6 +272,11 @@ func populateServerConfig(config *Config) *Config {
 	if connIDLen == 0 {
 		connIDLen = protocol.DefaultConnectionIDLength
 	}
+	for _, v := range versions {
+		if v == protocol.Version44 {
+			connIDLen = protocol.ConnectionIDLenGQUIC
+		}
+	}
 
 	return &Config{
 		Versions:                              versions,
@@ -298,6 +305,15 @@ func (s *server) Accept() (Session, error) {
 
 // Close the server
 func (s *server) Close() error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if s.closed {
+		return nil
+	}
+	return s.closeWithMutex()
+}
+
+func (s *server) closeWithMutex() error {
 	s.sessionHandler.CloseServer()
 	if s.serverError == nil {
 		s.serverError = errors.New("server closed")
@@ -308,18 +324,24 @@ func (s *server) Close() error {
 	if s.createdPacketConn {
 		err = s.conn.Close()
 	}
+	s.closed = true
 	close(s.errorChan)
 	return err
+}
+
+func (s *server) closeWithError(e error) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.serverError = e
+	return s.closeWithMutex()
 }
 
 // Addr returns the server's network address
 func (s *server) Addr() net.Addr {
 	return s.conn.LocalAddr()
-}
-
-func (s *server) closeWithError(e error) error {
-	s.serverError = e
-	return s.Close()
 }
 
 func (s *server) handlePacket(p *receivedPacket) {
@@ -330,14 +352,20 @@ func (s *server) handlePacket(p *receivedPacket) {
 
 func (s *server) handlePacketImpl(p *receivedPacket) error {
 	hdr := p.header
-	version := hdr.Version
 
-	if hdr.Type == protocol.PacketTypeInitial {
-		go s.serverTLS.HandleInitial(p.remoteAddr, hdr, p.data)
+	if hdr.VersionFlag || hdr.IsLongHeader {
+		// send a Version Negotiation Packet if the client is speaking a different protocol version
+		if !protocol.IsSupportedVersion(s.config.Versions, hdr.Version) {
+			return s.sendVersionNegotiationPacket(p)
+		}
+	}
+	if hdr.Type == protocol.PacketTypeInitial && hdr.Version.UsesTLS() {
+		go s.serverTLS.HandleInitial(p)
 		return nil
 	}
 
-	if !hdr.VersionFlag {
+	// TODO(#943): send Stateless Reset, if this an IETF QUIC packet
+	if !hdr.VersionFlag && !hdr.Version.UsesIETFHeaderFormat() {
 		_, err := s.conn.WriteTo(wire.WritePublicReset(hdr.DestConnectionID, 0, 0), p.remoteAddr)
 		return err
 	}
@@ -348,24 +376,20 @@ func (s *server) handlePacketImpl(p *receivedPacket) error {
 		return errors.New("dropping small packet for unknown connection")
 	}
 
-	// send a Version Negotiation Packet if the client is speaking a different protocol version
-	// since the client send a Public Header (only gQUIC has a Version Flag), we need to send a gQUIC Version Negotiation Packet
-	if hdr.VersionFlag && !protocol.IsSupportedVersion(s.config.Versions, version) {
-		s.logger.Infof("Client offered version %s, sending Version Negotiation Packet", version)
-		_, err := s.conn.WriteTo(wire.ComposeGQUICVersionNegotiation(hdr.DestConnectionID, s.config.Versions), p.remoteAddr)
-		return err
+	var destConnID, srcConnID protocol.ConnectionID
+	if hdr.Version.UsesIETFHeaderFormat() {
+		srcConnID = hdr.DestConnectionID
+	} else {
+		destConnID = hdr.DestConnectionID
+		srcConnID = hdr.DestConnectionID
 	}
-
-	if !protocol.IsSupportedVersion(s.config.Versions, version) {
-		return errors.New("Server BUG: negotiated version not supported")
-	}
-
-	s.logger.Infof("Serving new connection: %s, version %s from %v", hdr.DestConnectionID, version, p.remoteAddr)
+	s.logger.Infof("Serving new connection: %s, version %s from %v", hdr.DestConnectionID, hdr.Version, p.remoteAddr)
 	sess, err := s.newSession(
 		&conn{pconn: s.conn, currentAddr: p.remoteAddr},
 		s.sessionRunner,
-		version,
-		hdr.DestConnectionID,
+		hdr.Version,
+		destConnID,
+		srcConnID,
 		s.scfg,
 		s.tlsConf,
 		s.config,
@@ -378,4 +402,22 @@ func (s *server) handlePacketImpl(p *receivedPacket) error {
 	go sess.run()
 	sess.handlePacket(p)
 	return nil
+}
+
+func (s *server) sendVersionNegotiationPacket(p *receivedPacket) error {
+	hdr := p.header
+	s.logger.Debugf("Client offered version %s, sending VersionNegotiationPacket", hdr.Version)
+
+	var data []byte
+	if hdr.IsPublicHeader {
+		data = wire.ComposeGQUICVersionNegotiation(hdr.DestConnectionID, s.config.Versions)
+	} else {
+		var err error
+		data, err = wire.ComposeVersionNegotiation(hdr.SrcConnectionID, hdr.DestConnectionID, s.config.Versions)
+		if err != nil {
+			return err
+		}
+	}
+	_, err := s.conn.WriteTo(data, p.remoteAddr)
+	return err
 }

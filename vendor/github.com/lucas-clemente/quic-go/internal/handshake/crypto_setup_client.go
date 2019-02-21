@@ -69,10 +69,9 @@ var (
 // NewCryptoSetupClient creates a new CryptoSetup instance for a client
 func NewCryptoSetupClient(
 	cryptoStream io.ReadWriter,
-	hostname string,
 	connID protocol.ConnectionID,
 	version protocol.VersionNumber,
-	tlsConfig *tls.Config,
+	tlsConf *tls.Config,
 	params *TransportParameters,
 	paramsChan chan<- TransportParameters,
 	handshakeEvent chan<- struct{},
@@ -86,18 +85,20 @@ func NewCryptoSetupClient(
 	}
 	divNonceChan := make(chan struct{})
 	cs := &cryptoSetupClient{
-		cryptoStream:       cryptoStream,
-		hostname:           hostname,
-		connID:             connID,
-		version:            version,
-		certManager:        crypto.NewCertManager(tlsConfig),
-		params:             params,
-		keyDerivation:      crypto.DeriveQuicCryptoAESKeys,
-		nullAEAD:           nullAEAD,
-		paramsChan:         paramsChan,
-		handshakeEvent:     handshakeEvent,
-		initialVersion:     initialVersion,
-		negotiatedVersions: negotiatedVersions,
+		cryptoStream:   cryptoStream,
+		hostname:       tlsConf.ServerName,
+		connID:         connID,
+		version:        version,
+		certManager:    crypto.NewCertManager(tlsConf),
+		params:         params,
+		keyDerivation:  crypto.DeriveQuicCryptoAESKeys,
+		nullAEAD:       nullAEAD,
+		paramsChan:     paramsChan,
+		handshakeEvent: handshakeEvent,
+		initialVersion: initialVersion,
+		// The server might have sent greased versions in the Version Negotiation packet.
+		// We need strip those from the list, since they won't be included in the handshake tag.
+		negotiatedVersions: protocol.StripGreasedVersions(negotiatedVersions),
 		divNonceChan:       divNonceChan,
 		logger:             logger,
 	}
