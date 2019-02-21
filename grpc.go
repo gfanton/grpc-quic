@@ -54,17 +54,7 @@ func newQuicDialer(tlsConf *tls.Config) func(string, time.Duration) (net.Conn, e
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
 
-			pconn, err := newPacketConn(":0")
-			if err != nil {
-				return nil, err
-			}
-
-			udpAddr, err := net.ResolveUDPAddr("udp", laddr)
-			if err != nil {
-				return nil, err
-			}
-
-			sess, err := quic.DialContext(ctx, pconn, udpAddr, laddr, tlsConf, quicConfig)
+			sess, err := quic.DialAddrContext(ctx, laddr, tlsConf, quicConfig)
 			if err != nil {
 				return nil, err
 			}
